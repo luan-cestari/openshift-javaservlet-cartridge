@@ -1,0 +1,132 @@
+#!/bin/bash -e
+
+source $OPENSHIFT_CARTRIDGE_SDK_BASH
+
+WILDFLY_BIN_DIR=${OPENSHIFT_WILDFLY_DIR}/bin
+WILDFLY_PID_FILE=${OPENSHIFT_HOMEDIR}/app-root/runtime/jbossas.pid
+WILDFLY_DEPLOYMENTS_DIR=${OPENSHIFT_WILDFLY_DIR}/standalone/deployments
+SCANCONFIG=""
+
+source $WILDFLY_BIN_DIR/util
+
+cartridge_type="java"
+
+
+function isrunning() {
+# Check for running app
+	pid=$(ps -ef | grep "java" | grep -v "aven" | awk '{print $2}')
+	if [ "$pid" != "" ]; then
+		return 0
+	else
+		return 1
+	fi
+}
+
+# Check if the server http port is up
+function ishttpup() {
+	echo "Is HTTP up?"
+}
+
+function build() {
+
+  if [ -z "$BUILD_NUMBER" ]
+  then
+      if marker_present force_clean_build
+      then
+          echo ".openshift/markers/force_clean_build found!  Removing Maven dependencies." 1>&2
+          rm -rf ${OPENSHIFT_HOMEDIR}.m2/* ${OPENSHIFT_HOMEDIR}.m2/.[^.]*
+      fi
+
+      if [ -f ${OPENSHIFT_REPO_DIR}pom.xml ] && ! marker_present skip_maven_build
+      then
+          update-configuration
+
+          export MAVEN_OPTS="$OPENSHIFT_MAVEN_XMX"
+          export PATH=$JAVA_HOME/bin:$M2_HOME/bin:$PATH
+          pushd ${OPENSHIFT_REPO_DIR} > /dev/null
+
+          if [ -z "$MAVEN_OPTS" ]; then
+            export MAVEN_OPTS="$OPENSHIFT_MAVEN_XMX"
+          fi
+
+
+
+          if [ -n "$OPENSHIFT_MAVEN_MIRROR" ]
+          then
+              $OPENSHIFT_WILDFLY_DIR/bin/tools/mvn --global-settings $OPENSHIFT_MAVEN_MIRROR --version
+              $OPENSHIFT_WILDFLY_DIR/bin/tools/mvn --global-settings $OPENSHIFT_MAVEN_MIRROR
+          else
+              $OPENSHIFT_WILDFLY_DIR/bin/tools/mvn --version
+              $OPENSHIFT_WILDFLY_DIR/bin/tools/mvn
+          fi
+          popd > /dev/null
+      fi
+  fi
+
+}
+
+function deploy() {
+  echo "Deploying $cartridge_type cart"
+
+}
+
+function start() {
+  echo "Starting $cartridge_type cart"
+  echo `date` >> ${OPENSHIFT_DATA_DIR}test.log
+  echo "executing script" >> ${OPENSHIFT_DATA_DIR}test.log
+  build
+}
+
+
+function stop() {
+  echo "Stopping $cartridge_type cart"
+  if isrunning
+  then
+	  pid=$(ps -ef |  grep "java" | grep -v "aven" | awk '{print $2}')
+	  echo "Sending SIGTERM to :$pid ..." 1>&2
+	  kill $pid
+  fi
+ 
+}
+
+function restart() {
+    echo "Restarting $cartridge_type cart"
+
+    stop
+
+    start
+}
+
+function status() {
+   if isrunning
+   then
+      client_result "Application is running"
+   else
+      client_result "Application is either stopped or inaccessible"
+   fi
+}
+
+function reload() {
+    echo "Reloading $cartridge_type cart"
+    restart
+}
+
+# Clean up any log files
+function tidy() {
+  client_message "Emptying log dir: $OPENSHIFT_WILDFLY_LOG_DIR"
+  shopt -s dotglob
+  rm -rf $OPENSHIFT_WILDFLY_LOG_DIR/*
+}
+
+case "$1" in
+  build)           build ;;
+  deploy)          deploy ;;
+  start)           start ;;
+  stop)            stop ;;
+  restart)         restart ;;
+  status)          status ;;
+  reload)          reload ;;
+  tidy)            tidy ;;
+  *)               exit 0
+esac
+
